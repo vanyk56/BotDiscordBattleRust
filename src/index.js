@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import {createServer} from 'node:http';
-import {Client,GatewayIntentBits,EmbedBuilder,ActionRowBuilder,ButtonBuilder,ButtonStyle,Events,PermissionFlagsBits} from 'discord.js';
+import {Client,GatewayIntentBits,EmbedBuilder,ActionRowBuilder,ButtonBuilder,ButtonStyle,Events,PermissionFlagsBits,SlashCommandBuilder,ActivityType} from 'discord.js';
 import {GameDig} from 'gamedig';
 
 for(const key of ['DISCORD_TOKEN','RUST_API_URL','RUST_API_SECRET']) if(!process.env[key]) throw new Error(`Не задано ${key}`);
@@ -10,6 +10,15 @@ const apiBase=process.env.RUST_API_URL.replace(/\/$/,'');
 const client=new Client({intents:[GatewayIntentBits.Guilds]});
 const statusMessages=new Map(), votes=new Map();
 const startedAt=new Date();
+
+const slashCommands=[
+ new SlashCommandBuilder().setName('setup').setDescription('Закрепить меню BattleRust').setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
+ new SlashCommandBuilder().setName('status').setDescription('Статус сервера BattleRust'),
+ new SlashCommandBuilder().setName('link').setDescription('Привязать Steam ID').addStringOption(o=>o.setName('code').setDescription('Код /link из игры').setRequired(true)),
+ new SlashCommandBuilder().setName('stats').setDescription('Статистика игрока').addUserOption(o=>o.setName('user').setDescription('Discord-пользователь')),
+ new SlashCommandBuilder().setName('top').setDescription('Таблица лидеров').addStringOption(o=>o.setName('category').setDescription('Категория').setRequired(true).addChoices({name:'Убийства',value:'kills'},{name:'K/D',value:'kd'},{name:'Онлайн',value:'playtime'},{name:'Фарм',value:'farm'},{name:'Рейды',value:'raids'},{name:'Очки',value:'score'})),
+ new SlashCommandBuilder().setName('idea').setDescription('Предложить идею').addStringOption(o=>o.setName('text').setDescription('Опишите идею').setRequired(true).setMaxLength(1000))
+].map(c=>c.toJSON());
 
 // Railway выдаёт PORT автоматически и проверяет HTTP endpoint перед активацией deploy.
 const healthServer=createServer((req,res)=>{
@@ -63,9 +72,20 @@ async function top(i,category='score'){
 }
 function ideaRow(up,down){return new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('idea_up').setLabel(String(up)).setEmoji('✅').setStyle(ButtonStyle.Secondary),new ButtonBuilder().setCustomId('idea_down').setLabel(String(down)).setEmoji('❌').setStyle(ButtonStyle.Secondary));}
 
-client.once(Events.ClientReady,c=>{
- console.log(`${brand}: бот запущен как ${c.user.tag}`);c.user.setActivity(`${brand} • /status`);
- setInterval(async()=>{const embed=await statusEmbed();for(const[k,r]of statusMessages){try{const ch=await client.channels.fetch(r.channelId),m=await ch.messages.fetch(r.messageId);await m.edit({embeds:[embed]});}catch{statusMessages.delete(k);}}},Math.max(30,Number(process.env.STATUS_INTERVAL_SECONDS||60))*1000).unref();
+client.once(Events.ClientReady,async c=>{
+ console.log(`${brand}: бот запущен как ${c.user.tag}`);
+ try{
+  if(process.env.DISCORD_GUILD_ID){const guild=await c.guilds.fetch(process.env.DISCORD_GUILD_ID);await guild.commands.set(slashCommands);console.log(`Команды зарегистрированы на сервере ${guild.name}: ${slashCommands.length}`);}
+  else{await c.application.commands.set(slashCommands);console.log(`Глобальные команды зарегистрированы: ${slashCommands.length}`);}
+ }catch(e){console.error(`Не удалось зарегистрировать slash-команды: ${e.message}`);}
+ const refresh=async()=>{
+  const server=await queryServer();
+  c.user.setPresence({activities:[{name:`${server.players}/${server.max} • Play`,type:ActivityType.Playing}],status:server.online?'online':'dnd'});
+  const embed=await statusEmbed();
+  for(const[k,r]of statusMessages){try{const ch=await client.channels.fetch(r.channelId),m=await ch.messages.fetch(r.messageId);await m.edit({embeds:[embed]});}catch{statusMessages.delete(k);}}
+ };
+ await refresh();
+ setInterval(refresh,Math.max(30,Number(process.env.STATUS_INTERVAL_SECONDS||60))*1000).unref();
 });
 client.on(Events.InteractionCreate,async i=>{try{
  if(i.isChatInputCommand()){
