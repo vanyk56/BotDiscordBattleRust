@@ -36,16 +36,21 @@ async function api(path,options={}){
  return body;
 }
 async function queryServer(){
+ if(process.env.RUST_HOST){
+  try{
+   const s=await GameDig.query({type:'rust',host:process.env.RUST_HOST,port:Number(process.env.RUST_QUERY_PORT||20636),maxAttempts:2,socketTimeout:4000});
+   return{online:true,name:s.name||brand,map:s.map||'—',players:Number(s.numplayers||0),max:Number(s.maxplayers||0),ping:s.ping,connect:`${process.env.RUST_HOST}:${process.env.RUST_CONNECT_PORT||20635}`,source:'Live Query'};
+  }catch(e){console.warn(`Прямой Query недоступен: ${e.message}; пробую GameMonitoring`);}
+ }
  if(process.env.GAMEMONITORING_SERVER_ID){
   try{
    const response=await fetch(`https://api.gamemonitoring.ru/servers/${encodeURIComponent(process.env.GAMEMONITORING_SERVER_ID)}`,{signal:AbortSignal.timeout(5000)});
    if(!response.ok)throw new Error(`GameMonitoring ${response.status}`);
    const json=await response.json(),s=json.response||json;
-   return{online:Boolean(s.status),name:s.name||brand,map:s.map||s.map_name||'—',players:Number(s.numplayers||0),max:Number(s.maxplayers||0),ping:null,connect:s.connect||`${s.ip}:${s.port}`,source:'GameMonitoring'};
-  }catch(e){console.warn(`GameMonitoring недоступен: ${e.message}; пробую прямой Query`);}
+   return{online:Boolean(s.status),name:s.name||brand,map:s.map||s.map_name||'—',players:Number(s.numplayers||0),max:Number(s.maxplayers||0),ping:null,connect:s.connect||`${s.ip}:${s.port}`,source:'GameMonitoring (резерв)'};
+  }catch(e){console.warn(`GameMonitoring недоступен: ${e.message}`);}
  }
- try{const s=await GameDig.query({type:'rust',host:process.env.RUST_HOST||'127.0.0.1',port:Number(process.env.RUST_QUERY_PORT||28017),maxAttempts:2,socketTimeout:3000});return{online:true,name:s.name,map:s.map,players:s.numplayers,max:s.maxplayers,ping:s.ping};}
- catch{return{online:false,name:brand,map:'—',players:0,max:0,ping:0};}
+ return{online:false,name:brand,map:'—',players:0,max:0,ping:null};
 }
 async function statusEmbed(){
  const s=await queryServer(),address=s.connect||`${process.env.RUST_HOST||'127.0.0.1'}:${process.env.RUST_CONNECT_PORT||28015}`,connect=`connect ${address}`;
