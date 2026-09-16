@@ -90,7 +90,7 @@ function linkModal(){return new ModalBuilder().setCustomId('link_modal').setTitl
 function ideaModal(){return new ModalBuilder().setCustomId('idea_modal').setTitle('Предложить идею').addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('idea_text').setLabel('Описание идеи').setPlaceholder('Опишите предложение для сервера').setStyle(TextInputStyle.Paragraph).setMaxLength(1000).setRequired(true)));}
 
 client.once(Events.ClientReady,async c=>{
- console.log(`${brand}: бот запущен как ${c.user.tag}`);
+ console.log(`${brand}: бот запущен как ${c.user.tag}; сборка ${process.env.BOT_BUILD||'dev'}; команд в коде ${slashCommands.length}`);
  try{
   if(process.env.DISCORD_GUILD_ID){const guild=await c.guilds.fetch(process.env.DISCORD_GUILD_ID);await guild.commands.set(slashCommands);console.log(`Команды зарегистрированы на сервере ${guild.name}: ${slashCommands.length}`);}
   else{await c.application.commands.set(slashCommands);console.log(`Глобальные команды зарегистрированы: ${slashCommands.length}`);}
