@@ -72,7 +72,7 @@ function menuRows(){return[new ActionRowBuilder().addComponents(
  new ButtonBuilder().setCustomId('br_stats').setLabel('Моя статистика').setStyle(ButtonStyle.Secondary))];}
 function statsPanel(){return new ContainerBuilder().setAccentColor(0xa8e063).addTextDisplayComponents(new TextDisplayBuilder().setContent('### Статистика\nВыберите действие ниже.')).addActionRowComponents(menuRows()[0]);}
 function ideasPanel(){const row=new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('idea_open').setLabel('Предложить идею').setStyle(ButtonStyle.Secondary));return new ContainerBuilder().setAccentColor(0xa8e063).addTextDisplayComponents(new TextDisplayBuilder().setContent('### Идеи и предложения\nПредложите изменение или новую возможность для сервера. После публикации участники смогут проголосовать.')).addActionRowComponents(row);}
-function infoPanel(){return new ContainerBuilder().setAccentColor(0xa8e063).addTextDisplayComponents(new TextDisplayBuilder().setContent('### Информация о сервере\n[Telegram](https://t.me/xdaitt123)\n\n**Вайпы**\nКаждые 48 часов в 17:00\n\n**Подключение к серверу**\n`connect 157.85.95.155:20635`'));}
+function infoPanel(){return new ContainerBuilder().setAccentColor(0xa8e063).addTextDisplayComponents(new TextDisplayBuilder().setContent('@everyone\n### Информация о сервере\n[Telegram](https://t.me/xdaitt123)\n\n**Вайпы**\nКаждые 48 часов в 17:00\n\n**Подключение к серверу**\n`connect 157.85.95.155:20635`'));}
 const fmt=s=>`${Math.floor(s/3600)}ч ${Math.floor(s%3600/60)}м`;
 function statsEmbed(p){
  const kd=p.deaths?(p.kills/p.deaths).toFixed(2):p.kills.toFixed(2);
@@ -112,7 +112,7 @@ client.on(Events.InteractionCreate,async i=>{try{
  if(i.isChatInputCommand()){
   if(i.commandName==='setup'){if(!i.memberPermissions?.has(PermissionFlagsBits.ManageGuild))return i.reply({content:'Нужно право «Управлять сервером».',ephemeral:true});const m=await i.channel.send({components:[statsPanel()],flags:MessageFlags.IsComponentsV2});await m.pin().catch(()=>null);return i.reply({content:'Панель статистики опубликована и закреплена.',ephemeral:true});}
   if(i.commandName==='setup-ideas'){const m=await i.channel.send({components:[ideasPanel()],flags:MessageFlags.IsComponentsV2});await m.pin().catch(()=>null);return i.reply({content:'Панель идей опубликована и закреплена в этом канале.',ephemeral:true});}
-  if(i.commandName==='setup-info'){const m=await i.channel.send({components:[infoPanel()],flags:MessageFlags.IsComponentsV2});await m.pin().catch(()=>null);return i.reply({content:'Информация опубликована и закреплена.',ephemeral:true});}
+  if(i.commandName==='setup-info'){const m=await i.channel.send({components:[infoPanel()],flags:MessageFlags.IsComponentsV2,allowedMentions:{parse:['everyone']}});await m.pin().catch(()=>null);return i.reply({content:'Информация опубликована, @everyone упомянут и сообщение закреплено.',ephemeral:true});}
   if(i.commandName==='status')return i.reply({embeds:[await statusEmbed()]});
   if(i.commandName==='stats')return myStats(i,i.options.getUser('user')?.id||i.user.id);
   if(i.commandName==='top')return top(i,i.options.getString('category'));
