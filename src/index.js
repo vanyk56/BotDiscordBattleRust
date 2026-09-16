@@ -8,7 +8,8 @@ const brand=process.env.BRAND_NAME||'BattleRust';
 const color=parseInt(process.env.BRAND_COLOR||'E25B2A',16);
 const apiBase=process.env.RUST_API_URL.replace(/\/$/,'');
 const client=new Client({intents:[GatewayIntentBits.Guilds]});
-const statusMessages=new Map(), votes=new Map();
+const statusMessages=new Map(), votes=new Map(), localLinks=new Map();
+const pendingClaims=[];
 const startedAt=new Date();
 let pushedServerState=null;
 
@@ -27,7 +28,7 @@ const slashCommands=[
 const healthServer=createServer((req,res)=>{
  if(req.url==='/ingest'&&req.method==='POST'){
   if(req.headers['x-battlerust-secret']!==process.env.RUST_API_SECRET){res.writeHead(401);return res.end('unauthorized');}
-  let body='';req.on('data',chunk=>{if(body.length<65536)body+=chunk;});req.on('end',()=>{try{const data=JSON.parse(body);pushedServerState={...data,receivedAt:Date.now()};res.writeHead(204);res.end();}catch{res.writeHead(400);res.end('invalid json');}});return;
+  let body='';req.on('data',chunk=>{if(body.length<5000000)body+=chunk;});req.on('end',()=>{try{const data=JSON.parse(body);pushedServerState={...data,receivedAt:Date.now()};for(const [discordId,steamId] of Object.entries(data.links||{}))localLinks.set(discordId,String(steamId));const claims=pendingClaims.splice(0);res.writeHead(200,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify({claims}));}catch{res.writeHead(400);res.end('invalid json');}});return;
  }
  if(req.url!=='/'&&req.url!=='/health'){res.writeHead(404);return res.end('not found');}
  const ready=client.isReady();
@@ -43,6 +44,19 @@ async function api(path,options={}){
  const body=await response.json().catch(()=>({}));
  if(!response.ok) throw new Error(body.error||`API ${response.status}`);
  return body;
+}
+function freshStats(){return pushedServerState&&Date.now()-pushedServerState.receivedAt<120000&&Array.isArray(pushedServerState.stats);}
+async function statsForDiscord(discordId){
+ if(freshStats()){const steamId=localLinks.get(discordId)||String((pushedServerState.links||{})[discordId]||'');const player=pushedServerState.stats.find(p=>String(p.steamId)===steamId);if(player)return player;if(!steamId)throw new Error('Steam ID не привязан. Получите код командой /link в игре.');}
+ return api(`/api/stats/discord/${discordId}`);
+}
+async function topFromSource(category,limit){
+ if(freshStats()){const value=p=>category==='kd'?(p.deaths?p.kills/p.deaths:p.kills):category==='playtime'?p.playtimeSeconds:category==='farm'?p.totalFarm:category==='raids'?p.totalRaids:category==='kills'?p.kills:p.score;const label=(p,v)=>category==='playtime'?`${Math.floor(v/86400)}д ${Math.floor(v%86400/3600)}ч ${Math.floor(v%3600/60)}м`:category==='kd'||category==='score'?Number(v).toFixed(2):Number(v).toLocaleString('ru-RU');return{players:[...pushedServerState.stats].sort((a,b)=>value(b)-value(a)).slice(0,limit).map(p=>({...p,value:value(p),valueLabel:label(p,value(p))}))};}
+ return api(`/api/top?category=${encodeURIComponent(category)}&limit=${limit}`);
+}
+async function claimSteam(code,discordId){
+ if(freshStats()&&pushedServerState.codes&&pushedServerState.codes[code]){const entry=pushedServerState.codes[code],steamId=String(entry.steamId||entry.SteamId),expiresAt=Number(entry.expiresAt||entry.ExpiresAt||0);if(expiresAt&&expiresAt<Math.floor(Date.now()/1000))throw new Error('Код истёк. Создайте новый командой /link в игре.');const player=pushedServerState.stats.find(p=>String(p.steamId)===steamId);localLinks.set(discordId,steamId);pendingClaims.push({code,discordId});delete pushedServerState.codes[code];return{name:player?.name||steamId,steamId};}
+ return api('/api/link/claim',{method:'POST',body:JSON.stringify({code,discordId})});
 }
 async function queryServer(){
  if(pushedServerState&&Date.now()-pushedServerState.receivedAt<45000){
@@ -84,9 +98,9 @@ function statsEmbed(p){
  {name:'Ресурсы',value:`Добыто: **${p.totalFarm.toLocaleString('ru-RU')}**\nВзрывчатки: **${p.totalRaids.toLocaleString('ru-RU')}**`,inline:true},
  {name:'Другое',value:`Ящиков: ${p.cratesOpened}\nБочек: ${p.barrelsDestroyed}\nЖивотных: ${p.animalsKilled}\nNPC: ${p.npcKilled}`}).setFooter({text:brand}).setTimestamp();
 }
-async function myStats(i,id=i.user.id){try{await i.reply({embeds:[statsEmbed(await api(`/api/stats/discord/${id}`))],ephemeral:true});}catch(e){if(!i.replied&&!i.deferred)return i.showModal(linkModal());throw e;}}
+async function myStats(i,id=i.user.id){try{await i.reply({embeds:[statsEmbed(await statsForDiscord(id))],ephemeral:true});}catch(e){if(!i.replied&&!i.deferred)return i.showModal(linkModal());throw e;}}
 async function top(i,category='score',limit=10){
- try{const d=await api(`/api/top?category=${encodeURIComponent(category)}&limit=${limit}`),names={kills:'убийствам',kd:'K/D',playtime:'онлайну',farm:'фарму',raids:'рейдам',score:'очкам'};const lines=d.players.map((p,n)=>`**${n+1}.** ${p.name} — **${p.valueLabel}**`).join('\n')||'Данных пока нет.';await i.reply({embeds:[new EmbedBuilder().setColor(0xa8e063).setTitle(`Топ-${limit} по ${names[category]||category}`).setDescription(lines).setFooter({text:brand})],ephemeral:true});}
+ try{const d=await topFromSource(category,limit),names={kills:'убийствам',kd:'K/D',playtime:'онлайну',farm:'фарму',raids:'рейдам',score:'очкам'};const lines=d.players.map((p,n)=>`**${n+1}.** ${p.name} — **${p.valueLabel}**`).join('\n')||'Данных пока нет.';await i.reply({embeds:[new EmbedBuilder().setColor(0xa8e063).setTitle(`Топ-${limit} по ${names[category]||category}`).setDescription(lines).setFooter({text:brand})],ephemeral:true});}
  catch(e){await i.reply({content:`Не удалось получить топ: ${e.message}`,ephemeral:true});}
 }
 function ideaRow(up,down){return new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('idea_up').setLabel(String(up)).setEmoji('✅').setStyle(ButtonStyle.Secondary),new ButtonBuilder().setCustomId('idea_down').setLabel(String(down)).setEmoji('❌').setStyle(ButtonStyle.Secondary));}
@@ -118,19 +132,18 @@ client.on(Events.InteractionCreate,async i=>{try{
   if(i.commandName==='status')return i.reply({embeds:[await statusEmbed()]});
   if(i.commandName==='stats')return myStats(i,i.options.getUser('user')?.id||i.user.id);
   if(i.commandName==='top')return top(i,i.options.getString('category'));
-  if(i.commandName==='link'){const r=await api('/api/link/claim',{method:'POST',body:JSON.stringify({code:i.options.getString('code'),discordId:i.user.id})});return i.reply({content:`Steam-профиль ${r.name} успешно привязан.`,ephemeral:true});}
+  if(i.commandName==='link'){const r=await claimSteam(i.options.getString('code'),i.user.id);return i.reply({content:`Steam-профиль ${r.name} успешно привязан.`,ephemeral:true});}
   if(i.commandName==='idea'){await i.reply({embeds:[ideaEmbed(i.options.getString('text'),i.user.id)],components:[ideaRow(0,0)]});const m=await i.fetchReply();votes.set(m.id,new Map());return;}
  }
  if(i.isButton()){
-  // Open the modal immediately: waiting for the Rust API can make the Discord interaction expire.
-  if(i.customId==='br_stats')return i.showModal(linkModal());
+  if(i.customId==='br_stats')return myStats(i);
   if(i.customId==='br_top')return top(i,'score',5);
   if(i.customId==='br_open_link')return i.showModal(linkModal());
   if(i.customId==='idea_open')return i.showModal(ideaModal());
   if(i.customId.startsWith('idea_')){const map=votes.get(i.message.id)||new Map(),choice=i.customId==='idea_up'?'up':'down';map.set(i.user.id,choice);votes.set(i.message.id,map);let up=0,down=0;for(const v of map.values())v==='up'?up++:down++;return i.update({components:[ideaRow(up,down)]});}
  }
  if(i.isModalSubmit()){
-  if(i.customId==='link_modal'){const code=i.fields.getTextInputValue('link_code');await i.deferReply({ephemeral:true});const r=await api('/api/link/claim',{method:'POST',body:JSON.stringify({code,discordId:i.user.id})});return i.editReply({content:`Steam-профиль ${r.name} успешно привязан.`});}
+  if(i.customId==='link_modal'){const code=i.fields.getTextInputValue('link_code');await i.deferReply({ephemeral:true});const r=await claimSteam(code,i.user.id);return i.editReply({content:`Steam-профиль ${r.name} успешно привязан.`});}
   if(i.customId==='idea_modal'){await i.reply({embeds:[ideaEmbed(i.fields.getTextInputValue('idea_text'),i.user.id)],components:[ideaRow(0,0)]});const m=await i.fetchReply();votes.set(m.id,new Map());return;}
  }
 }catch(e){console.error(e);const p={content:`Ошибка: ${e.message}`,ephemeral:true};if(i.deferred&&!i.replied)await i.editReply({content:p.content}).catch(()=>null);else if(i.replied||i.deferred)await i.followUp(p).catch(()=>null);else await i.reply(p).catch(()=>null);}});
