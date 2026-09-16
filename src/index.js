@@ -72,7 +72,7 @@ function menuRows(){return[new ActionRowBuilder().addComponents(
  new ButtonBuilder().setCustomId('br_stats').setLabel('Моя статистика').setStyle(ButtonStyle.Secondary))];}
 function statsPanel(){return new ContainerBuilder().setAccentColor(0xa8e063).addTextDisplayComponents(new TextDisplayBuilder().setContent('### Статистика\nВыберите действие ниже.')).addActionRowComponents(menuRows()[0]);}
 function ideasPanel(){const row=new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('idea_open').setLabel('Предложить идею').setStyle(ButtonStyle.Secondary));return new ContainerBuilder().setAccentColor(0xa8e063).addTextDisplayComponents(new TextDisplayBuilder().setContent('### Идеи и предложения\nПредложите изменение или новую возможность для сервера. После публикации участники смогут проголосовать.')).addActionRowComponents(row);}
-function infoPanel(){return new ContainerBuilder().setAccentColor(0xa8e063).addTextDisplayComponents(new TextDisplayBuilder().setContent('### Информация о сервере\n[Telegram](https://t.me/xdaitt123)\n[Discord](https://discord.gg/YYCm58Zrs)\n\n**Вайпы**\nКаждые 48 часов в 17:00\n\n**Подключение к серверу**\n`connect 157.85.95.155:20635`'));}
+function infoPanel(){return new ContainerBuilder().setAccentColor(0xa8e063).addTextDisplayComponents(new TextDisplayBuilder().setContent('### Информация о сервере\n[Telegram](https://t.me/xdaitt123)\n\n**Вайпы**\nКаждые 48 часов в 17:00\n\n**Подключение к серверу**\n`connect 157.85.95.155:20635`'));}
 const fmt=s=>`${Math.floor(s/3600)}ч ${Math.floor(s%3600/60)}м`;
 function statsEmbed(p){
  const kd=p.deaths?(p.kills/p.deaths).toFixed(2):p.kills.toFixed(2);
@@ -82,14 +82,14 @@ function statsEmbed(p){
  {name:'Ресурсы',value:`Добыто: **${p.totalFarm.toLocaleString('ru-RU')}**\nВзрывчатки: **${p.totalRaids.toLocaleString('ru-RU')}**`,inline:true},
  {name:'Другое',value:`Ящиков: ${p.cratesOpened}\nБочек: ${p.barrelsDestroyed}\nЖивотных: ${p.animalsKilled}\nNPC: ${p.npcKilled}`}).setFooter({text:brand}).setTimestamp();
 }
-async function myStats(i,id=i.user.id){try{await i.reply({embeds:[statsEmbed(await api(`/api/stats/discord/${id}`))],ephemeral:true});}catch(e){const row=new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('br_open_link').setLabel('Ввести код привязки').setStyle(ButtonStyle.Secondary));await i.reply({content:'Steam ID не привязан. Введите в игре `/link`, затем нажмите кнопку ниже и укажите полученный код.',components:[row],ephemeral:true});}}
+async function myStats(i,id=i.user.id){try{await i.reply({embeds:[statsEmbed(await api(`/api/stats/discord/${id}`))],ephemeral:true});}catch(e){if(!i.replied&&!i.deferred)return i.showModal(linkModal());throw e;}}
 async function top(i,category='score',limit=10){
  try{const d=await api(`/api/top?category=${encodeURIComponent(category)}&limit=${limit}`),names={kills:'убийствам',kd:'K/D',playtime:'онлайну',farm:'фарму',raids:'рейдам',score:'очкам'};const lines=d.players.map((p,n)=>`**${n+1}.** ${p.name} — **${p.valueLabel}**`).join('\n')||'Данных пока нет.';await i.reply({embeds:[new EmbedBuilder().setColor(0xa8e063).setTitle(`Топ-${limit} по ${names[category]||category}`).setDescription(lines).setFooter({text:brand})],ephemeral:true});}
  catch(e){await i.reply({content:`Не удалось получить топ: ${e.message}`,ephemeral:true});}
 }
-function ideaRow(up,down){return new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('idea_up').setLabel(`За — ${up}`).setStyle(ButtonStyle.Secondary),new ButtonBuilder().setCustomId('idea_down').setLabel(`Против — ${down}`).setStyle(ButtonStyle.Secondary));}
-function ideaEmbed(text,userId){return new EmbedBuilder().setColor(0xa8e063).setTitle('Идея').setDescription(text).addFields({name:'Создано',value:`<@${userId}>`}).setFooter({text:`${brand} • Голосование`}).setTimestamp();}
-function linkModal(){return new ModalBuilder().setCustomId('link_modal').setTitle('Привязка Steam ID').addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('link_code').setLabel('Код из команды /link в игре').setPlaceholder('Например: 123456').setStyle(TextInputStyle.Short).setMinLength(6).setMaxLength(6).setRequired(true)));}
+function ideaRow(up,down){return new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('idea_up').setLabel(String(up)).setEmoji('✅').setStyle(ButtonStyle.Secondary),new ButtonBuilder().setCustomId('idea_down').setLabel(String(down)).setEmoji('❌').setStyle(ButtonStyle.Secondary));}
+function ideaEmbed(text,userId){const safe=String(text).replace(/```/g,'ʼʼʼ');return new EmbedBuilder().setColor(0xa8e063).setTitle('Идея').setDescription(`\`\`\`\n${safe}\n\`\`\``).addFields({name:'Создано',value:`<@${userId}>`}).setFooter({text:`${brand} • Голосование`}).setTimestamp();}
+function linkModal(){return new ModalBuilder().setCustomId('link_modal').setTitle('Привязать Steam ID').addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('link_code').setLabel('Код привязки Steam ID').setPlaceholder('Получите код командой /link в игре').setStyle(TextInputStyle.Short).setMinLength(6).setMaxLength(6).setRequired(true)));}
 function ideaModal(){return new ModalBuilder().setCustomId('idea_modal').setTitle('Предложить идею').addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('idea_text').setLabel('Описание идеи').setPlaceholder('Опишите предложение для сервера').setStyle(TextInputStyle.Paragraph).setMaxLength(1000).setRequired(true)));}
 
 client.once(Events.ClientReady,async c=>{
