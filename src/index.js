@@ -37,7 +37,9 @@ const healthServer=createServer((req,res)=>{
 healthServer.listen(Number(process.env.PORT||3000),'0.0.0.0',()=>console.log(`Health server: 0.0.0.0:${process.env.PORT||3000}`));
 
 async function api(path,options={}){
- const response=await fetch(`${apiBase}${path}`,{...options,headers:{'Content-Type':'application/json','X-BattleRust-Secret':process.env.RUST_API_SECRET,...options.headers}});
+ let response;
+ try { response=await fetch(`${apiBase}${path}`,{...options,signal:options.signal||AbortSignal.timeout(8000),headers:{'Content-Type':'application/json','X-BattleRust-Secret':process.env.RUST_API_SECRET,...options.headers}}); }
+ catch { throw new Error('Нет связи с API игрового сервера. Проверьте RUST_API_URL и порт 28110.'); }
  const body=await response.json().catch(()=>({}));
  if(!response.ok) throw new Error(body.error||`API ${response.status}`);
  return body;
@@ -128,10 +130,10 @@ client.on(Events.InteractionCreate,async i=>{try{
   if(i.customId.startsWith('idea_')){const map=votes.get(i.message.id)||new Map(),choice=i.customId==='idea_up'?'up':'down';map.set(i.user.id,choice);votes.set(i.message.id,map);let up=0,down=0;for(const v of map.values())v==='up'?up++:down++;return i.update({components:[ideaRow(up,down)]});}
  }
  if(i.isModalSubmit()){
-  if(i.customId==='link_modal'){const code=i.fields.getTextInputValue('link_code');const r=await api('/api/link/claim',{method:'POST',body:JSON.stringify({code,discordId:i.user.id})});return i.reply({content:`Steam-профиль ${r.name} успешно привязан.`,ephemeral:true});}
+  if(i.customId==='link_modal'){const code=i.fields.getTextInputValue('link_code');await i.deferReply({ephemeral:true});const r=await api('/api/link/claim',{method:'POST',body:JSON.stringify({code,discordId:i.user.id})});return i.editReply({content:`Steam-профиль ${r.name} успешно привязан.`});}
   if(i.customId==='idea_modal'){await i.reply({embeds:[ideaEmbed(i.fields.getTextInputValue('idea_text'),i.user.id)],components:[ideaRow(0,0)]});const m=await i.fetchReply();votes.set(m.id,new Map());return;}
  }
-}catch(e){console.error(e);const p={content:`Ошибка: ${e.message}`,ephemeral:true};if(i.replied||i.deferred)await i.followUp(p).catch(()=>null);else await i.reply(p).catch(()=>null);}});
+}catch(e){console.error(e);const p={content:`Ошибка: ${e.message}`,ephemeral:true};if(i.deferred&&!i.replied)await i.editReply({content:p.content}).catch(()=>null);else if(i.replied||i.deferred)await i.followUp(p).catch(()=>null);else await i.reply(p).catch(()=>null);}});
 client.login(process.env.DISCORD_TOKEN);
 
 async function shutdown(signal){console.log(`${signal}: корректное завершение`);healthServer.close();client.destroy();process.exit(0);}

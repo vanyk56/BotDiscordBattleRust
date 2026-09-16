@@ -7,6 +7,6 @@ COPY src ./src
 RUN grep -q "setup-ideas" src/index.js && grep -q "setup-info" src/index.js
 
 ENV NODE_ENV=production
-ENV BOT_BUILD=1.3.2
+ENV BOT_BUILD=1.3.3
 EXPOSE 3000
 CMD ["npm", "start"]
