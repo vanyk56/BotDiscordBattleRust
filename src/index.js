@@ -120,7 +120,8 @@ client.on(Events.InteractionCreate,async i=>{try{
   if(i.commandName==='idea'){await i.reply({embeds:[ideaEmbed(i.options.getString('text'),i.user.id)],components:[ideaRow(0,0)]});const m=await i.fetchReply();votes.set(m.id,new Map());return;}
  }
  if(i.isButton()){
-  if(i.customId==='br_stats')return myStats(i);
+  // Open the modal immediately: waiting for the Rust API can make the Discord interaction expire.
+  if(i.customId==='br_stats')return i.showModal(linkModal());
   if(i.customId==='br_top')return top(i,'score',5);
   if(i.customId==='br_open_link')return i.showModal(linkModal());
   if(i.customId==='idea_open')return i.showModal(ideaModal());
