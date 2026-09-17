@@ -11,11 +11,12 @@ const client=new Client({intents:[GatewayIntentBits.Guilds]});
 const statusMessages=new Map(), votes=new Map(), localLinks=new Map();
 const pendingClaims=[];
 const startedAt=new Date();
-let pushedServerState=null, wipeChannelId=process.env.WIPE_CHANNEL_ID||'', wipeTimer=null;
+let pushedServerState=null, wipeChannelId=process.env.WIPE_CHANNEL_ID||'', ideaChannelId=process.env.IDEAS_CHANNEL_ID||'', wipeTimer=null;
 
 const slashCommands=[
  new SlashCommandBuilder().setName('setup').setDescription('Закрепить меню BattleRust').setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
  new SlashCommandBuilder().setName('setup-ideas').setDescription('Закрепить панель предложений в этом канале').setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
+ new SlashCommandBuilder().setName('setup-ideas-channel').setDescription('Назначить канал, куда будут поступать идеи').setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
  new SlashCommandBuilder().setName('setup-info').setDescription('Закрепить информацию о сервере').setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
  new SlashCommandBuilder().setName('setup-rules').setDescription('Опубликовать и закрепить правила').setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
  new SlashCommandBuilder().setName('setup-staff').setDescription('Опубликовать и закрепить список персонала').setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
@@ -109,6 +110,7 @@ async function top(i,category='score',limit=10){
 }
 function ideaRow(up,down){return new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('idea_up').setLabel(String(up)).setEmoji('✅').setStyle(ButtonStyle.Secondary),new ButtonBuilder().setCustomId('idea_down').setLabel(String(down)).setEmoji('❌').setStyle(ButtonStyle.Secondary));}
 function ideaEmbed(text,userId){const safe=String(text).replace(/```/g,'ʼʼʼ');return new EmbedBuilder().setColor(0xa8e063).setTitle('Идея').setDescription(`\`\`\`\n${safe}\n\`\`\``).addFields({name:'Создано',value:`<@${userId}>`}).setFooter({text:`${brand} • Голосование`}).setTimestamp();}
+async function publishIdea(sourceChannel,text,userId){const channel=ideaChannelId?await client.channels.fetch(ideaChannelId):sourceChannel;if(!channel?.isTextBased())throw new Error('Канал идей недоступен. Администратор должен повторно выполнить /setup-ideas-channel.');const m=await channel.send({embeds:[ideaEmbed(text,userId)],components:[ideaRow(0,0)]});votes.set(m.id,new Map());return m;}
 function linkModal(){return new ModalBuilder().setCustomId('link_modal').setTitle('Привязать Steam ID').addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('link_code').setLabel('Код привязки Steam ID').setPlaceholder('Получите код командой /link в игре').setStyle(TextInputStyle.Short).setMinLength(6).setMaxLength(6).setRequired(true)));}
 function ideaModal(){return new ModalBuilder().setCustomId('idea_modal').setTitle('Предложить идею').addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('idea_text').setLabel('Описание идеи').setPlaceholder('Опишите предложение для сервера').setStyle(TextInputStyle.Paragraph).setMaxLength(1000).setRequired(true)));}
 
@@ -133,6 +135,7 @@ client.on(Events.InteractionCreate,async i=>{try{
  if(i.isChatInputCommand()){
   if(i.commandName==='setup'){if(!i.memberPermissions?.has(PermissionFlagsBits.ManageGuild))return i.reply({content:'Нужно право «Управлять сервером».',ephemeral:true});const m=await i.channel.send({components:[statsPanel()],flags:MessageFlags.IsComponentsV2});await m.pin().catch(()=>null);return i.reply({content:'Панель статистики опубликована и закреплена.',ephemeral:true});}
   if(i.commandName==='setup-ideas'){const m=await i.channel.send({components:[ideasPanel()],flags:MessageFlags.IsComponentsV2});await m.pin().catch(()=>null);return i.reply({content:'Панель идей опубликована и закреплена в этом канале.',ephemeral:true});}
+  if(i.commandName==='setup-ideas-channel'){ideaChannelId=i.channelId;return i.reply({content:'Этот канал назначен для публикации идей. Для сохранения после перезапуска добавьте в Railway: IDEAS_CHANNEL_ID='+i.channelId,ephemeral:true});}
   if(i.commandName==='setup-info'){const m=await i.channel.send({components:[infoPanel()],flags:MessageFlags.IsComponentsV2,allowedMentions:{parse:['everyone']}});await m.pin().catch(()=>null);return i.reply({content:'Информация опубликована, @everyone упомянут и сообщение закреплено.',ephemeral:true});}
   if(i.commandName==='setup-rules'){const m=await i.channel.send({components:[rulesPanel()],flags:MessageFlags.IsComponentsV2,allowedMentions:{parse:['everyone']}});await m.pin().catch(()=>null);return i.reply({content:'Правила опубликованы, @everyone упомянут и сообщение закреплено.',ephemeral:true});}
   if(i.commandName==='setup-staff'){const m=await i.channel.send({components:[staffPanel()],flags:MessageFlags.IsComponentsV2,allowedMentions:{parse:['everyone','roles']}});await m.pin().catch(()=>null);return i.reply({content:'Список персонала опубликован, роли и @everyone упомянуты, сообщение закреплено.',ephemeral:true});}
@@ -142,7 +145,7 @@ client.on(Events.InteractionCreate,async i=>{try{
   if(i.commandName==='stats')return myStats(i,i.options.getUser('user')?.id||i.user.id);
   if(i.commandName==='top')return top(i,i.options.getString('category'));
   if(i.commandName==='link'){const r=await claimSteam(i.options.getString('code'),i.user.id);return i.reply({content:`Steam-профиль ${r.name} успешно привязан.`,ephemeral:true});}
-  if(i.commandName==='idea'){await i.reply({embeds:[ideaEmbed(i.options.getString('text'),i.user.id)],components:[ideaRow(0,0)]});const m=await i.fetchReply();votes.set(m.id,new Map());return;}
+  if(i.commandName==='idea'){await publishIdea(i.channel,i.options.getString('text'),i.user.id);return i.reply({content:'Идея опубликована в назначенном канале.',ephemeral:true});}
  }
  if(i.isButton()){
   if(i.customId==='br_stats')return myStats(i);
@@ -153,7 +156,7 @@ client.on(Events.InteractionCreate,async i=>{try{
  }
  if(i.isModalSubmit()){
   if(i.customId==='link_modal'){const code=i.fields.getTextInputValue('link_code');await i.deferReply({ephemeral:true});const r=await claimSteam(code,i.user.id);return i.editReply({content:`Steam-профиль ${r.name} успешно привязан.`});}
-  if(i.customId==='idea_modal'){await i.reply({embeds:[ideaEmbed(i.fields.getTextInputValue('idea_text'),i.user.id)],components:[ideaRow(0,0)]});const m=await i.fetchReply();votes.set(m.id,new Map());return;}
+  if(i.customId==='idea_modal'){await publishIdea(i.channel,i.fields.getTextInputValue('idea_text'),i.user.id);return i.reply({content:'Идея опубликована в назначенном канале.',ephemeral:true});}
  }
 }catch(e){console.error(e);const p={content:`Ошибка: ${e.message}`,ephemeral:true};if(i.deferred&&!i.replied)await i.editReply({content:p.content}).catch(()=>null);else if(i.replied||i.deferred)await i.followUp(p).catch(()=>null);else await i.reply(p).catch(()=>null);}});
 client.login(process.env.DISCORD_TOKEN);
