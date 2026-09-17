@@ -11,12 +11,15 @@ const client=new Client({intents:[GatewayIntentBits.Guilds]});
 const statusMessages=new Map(), votes=new Map(), localLinks=new Map();
 const pendingClaims=[];
 const startedAt=new Date();
-let pushedServerState=null;
+let pushedServerState=null, wipeChannelId=process.env.WIPE_CHANNEL_ID||'', wipeTimer=null;
 
 const slashCommands=[
  new SlashCommandBuilder().setName('setup').setDescription('Закрепить меню BattleRust').setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
  new SlashCommandBuilder().setName('setup-ideas').setDescription('Закрепить панель предложений в этом канале').setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
  new SlashCommandBuilder().setName('setup-info').setDescription('Закрепить информацию о сервере').setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
+ new SlashCommandBuilder().setName('setup-rules').setDescription('Опубликовать и закрепить правила').setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
+ new SlashCommandBuilder().setName('setup-wipe').setDescription('Назначить канал автоматических уведомлений о вайпе').setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
+ new SlashCommandBuilder().setName('wipe-now').setDescription('Отправить уведомление о вайпе сейчас').setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
  new SlashCommandBuilder().setName('status').setDescription('Статус сервера BattleRust'),
  new SlashCommandBuilder().setName('link').setDescription('Привязать Steam ID').addStringOption(o=>o.setName('code').setDescription('Код /link из игры').setRequired(true)),
  new SlashCommandBuilder().setName('stats').setDescription('Статистика игрока').addUserOption(o=>o.setName('user').setDescription('Discord-пользователь')),
@@ -114,6 +117,7 @@ client.once(Events.ClientReady,async c=>{
   if(process.env.DISCORD_GUILD_ID){const guild=await c.guilds.fetch(process.env.DISCORD_GUILD_ID);await guild.commands.set(slashCommands);console.log(`Команды зарегистрированы на сервере ${guild.name}: ${slashCommands.length}`);}
   else{await c.application.commands.set(slashCommands);console.log(`Глобальные команды зарегистрированы: ${slashCommands.length}`);}
  }catch(e){console.error(`Не удалось зарегистрировать slash-команды: ${e.message}`);}
+ scheduleWipes();
  const refresh=async()=>{
   const server=await queryServer();
   const extra=server.joining==null?'':` Play_${server.players} Join_${server.joining} Sleep_${server.sleepers}`;
@@ -129,6 +133,9 @@ client.on(Events.InteractionCreate,async i=>{try{
   if(i.commandName==='setup'){if(!i.memberPermissions?.has(PermissionFlagsBits.ManageGuild))return i.reply({content:'Нужно право «Управлять сервером».',ephemeral:true});const m=await i.channel.send({components:[statsPanel()],flags:MessageFlags.IsComponentsV2});await m.pin().catch(()=>null);return i.reply({content:'Панель статистики опубликована и закреплена.',ephemeral:true});}
   if(i.commandName==='setup-ideas'){const m=await i.channel.send({components:[ideasPanel()],flags:MessageFlags.IsComponentsV2});await m.pin().catch(()=>null);return i.reply({content:'Панель идей опубликована и закреплена в этом канале.',ephemeral:true});}
   if(i.commandName==='setup-info'){const m=await i.channel.send({components:[infoPanel()],flags:MessageFlags.IsComponentsV2,allowedMentions:{parse:['everyone']}});await m.pin().catch(()=>null);return i.reply({content:'Информация опубликована, @everyone упомянут и сообщение закреплено.',ephemeral:true});}
+  if(i.commandName==='setup-rules'){const m=await i.channel.send({components:[rulesPanel()],flags:MessageFlags.IsComponentsV2,allowedMentions:{parse:['everyone']}});await m.pin().catch(()=>null);return i.reply({content:'Правила опубликованы, @everyone упомянут и сообщение закреплено.',ephemeral:true});}
+  if(i.commandName==='setup-wipe'){wipeChannelId=i.channelId;scheduleWipes();const m=await i.channel.send({components:[wipeSchedulePanel(nextWipeTimestamp())],flags:MessageFlags.IsComponentsV2});await m.pin().catch(()=>null);return i.reply({content:'Канал авторассылки настроен. Для сохранения после перезапуска добавьте в Railway: WIPE_CHANNEL_ID='+i.channelId,ephemeral:true});}
+  if(i.commandName==='wipe-now'){await i.deferReply({ephemeral:true});await sendWipeAnnouncement(i.channelId);return i.editReply({content:'Объявление о вайпе отправлено.'});}
   if(i.commandName==='status')return i.reply({embeds:[await statusEmbed()]});
   if(i.commandName==='stats')return myStats(i,i.options.getUser('user')?.id||i.user.id);
   if(i.commandName==='top')return top(i,i.options.getString('category'));
@@ -152,3 +159,12 @@ client.login(process.env.DISCORD_TOKEN);
 async function shutdown(signal){console.log(`${signal}: корректное завершение`);healthServer.close();client.destroy();process.exit(0);}
 process.once('SIGTERM',()=>shutdown('SIGTERM'));
 process.once('SIGINT',()=>shutdown('SIGINT'));
+
+const WIPE_START_MS=Date.UTC(2026,8,17,14),WIPE_INTERVAL_MS=172800000;
+function nextWipeTimestamp(n=Date.now()){return n<WIPE_START_MS?WIPE_START_MS:WIPE_START_MS+(Math.floor((n-WIPE_START_MS)/WIPE_INTERVAL_MS)+1)*WIPE_INTERVAL_MS;}
+function formatMoscow(t){return new Intl.DateTimeFormat('ru-RU',{timeZone:'Europe/Moscow',dateStyle:'long',timeStyle:'short'}).format(new Date(t));}
+function rulesPanel(){const q=String.fromCharCode(96),b=['# 📚 Правила','','Правила едины для всех наших серверов. Незнание правил не освобождает от наказания.','Спорные ситуации решает администрация — с обязательным объяснением решения.','','▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬','','### 🚫 Строго запрещено',q+q+q+'diff','- Читы и стороннее ПО','- Отказ от проверки','- Багоюз и дюп','- Обход блокировки',q+q+q,'','**Читы** — бан навсегда при подтверждённом детекте.','**Отказ от проверки** приравнивается к читам.','**Обход бана** — срок удваивается, дополнительный аккаунт блокируется навсегда.','','### 💬 Запрещено в общении','• Оскорбления, переход на личности и упоминание родных','• Национальная и религиозная вражда','• Реклама других проектов в чате и никах','• Вымогательство и обман новичков вне игровой логики','','### ⚔️ Разрешено','Рейды, обманы внутри игры, союзы и предательства, засады у спавна.','*Это Rust — здесь так и задумано.*','','### ⚖️ Наказания',q+'1'+q+' нарушение → предупреждение или мут',q+'2'+q+' нарушение → бан от суток',q+'читы / багоюз'+q+' → перманентная блокировка сразу','','### 🛡️ Ваши гарантии','Каждый бан — с доказательствами.','Ошибочное решение можно обжаловать через поддержку.','Администраторский произвол рассматривается отдельно.','','**Есть вопросы**','Discord: <@1396809640846557247>','Telegram: '+q+'@koxxxymiron'+q,'','||@everyone||'].join('\n');return new ContainerBuilder().setAccentColor(0xa8e063).addTextDisplayComponents(new TextDisplayBuilder().setContent(b));}
+function wipePanel(){const q=String.fromCharCode(96),b=['# Battle Rust — вайп завершён','','На сервере **Battle Rust** произошёл плановый вайп. Мир обновлён и готов к новому старту.','','**Стартовый бонус**','Первые 10 игроков получат приятный бонус на старте.','','**Подключение к серверу**',q+'connect 157.85.95.155:20635'+q,'','**Дополнительный бонус**','Добавьте '+q+'#BattleRust'+q+' к игровому имени и получите бонус на сервере.','','Желаем удачного старта и приятной игры.','','@everyone'].join('\n');return new ContainerBuilder().setAccentColor(0xa8e063).addTextDisplayComponents(new TextDisplayBuilder().setContent(b));}
+function wipeSchedulePanel(t){return new ContainerBuilder().setAccentColor(0xa8e063).addTextDisplayComponents(new TextDisplayBuilder().setContent('# Расписание вайпов\n\nАвтоматическая рассылка настроена на этот канал.\n\n**Следующий вайп:** '+formatMoscow(t)+' по московскому времени\n**Периодичность:** каждые 2 дня в 17:00'));}
+async function sendWipeAnnouncement(id=wipeChannelId){if(!id)throw new Error('Канал вайпов не настроен. Используйте /setup-wipe.');const ch=await client.channels.fetch(id);if(!ch?.isTextBased())throw new Error('Канал недоступен.');return ch.send({components:[wipePanel()],flags:MessageFlags.IsComponentsV2,allowedMentions:{parse:['everyone']}});}
+function scheduleWipes(){if(wipeTimer)clearTimeout(wipeTimer);if(!wipeChannelId){console.log('Авторассылка вайпов ожидает /setup-wipe или WIPE_CHANNEL_ID.');return;}const n=nextWipeTimestamp();console.log('Следующая рассылка о вайпе: '+formatMoscow(n));wipeTimer=setTimeout(async()=>{try{await sendWipeAnnouncement();}catch(e){console.error(e);}finally{scheduleWipes();}},Math.max(1000,n-Date.now()));wipeTimer.unref?.();}
