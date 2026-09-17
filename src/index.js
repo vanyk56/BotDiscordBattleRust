@@ -120,8 +120,8 @@ client.once(Events.ClientReady,async c=>{
  scheduleWipes();
  const refresh=async()=>{
   const server=await queryServer();
-  const extra=server.joining==null?'':` Play_${server.players} Join_${server.joining} Sleep_${server.sleepers}`;
-  c.user.setPresence({activities:[{name:`${server.players}/${server.max}${extra||' • Play'}`,type:ActivityType.Playing}],status:server.online?'online':'dnd'});
+  const presenceText=server.online?'Online '+server.players+'/'+server.max:'Offline';
+  c.user.setPresence({activities:[{name:presenceText,type:ActivityType.Playing}],status:server.online?'online':'dnd'});
   const embed=await statusEmbed();
   for(const[k,r]of statusMessages){try{const ch=await client.channels.fetch(r.channelId),m=await ch.messages.fetch(r.messageId);await m.edit({embeds:[embed]});}catch{statusMessages.delete(k);}}
  };
